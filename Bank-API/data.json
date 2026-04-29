@@ -61,11 +61,13 @@
     "inDrive Egypt",
     "Cairo Metro CTA",
     "Swvl Egypt",
-    "Halan",
+    "DiDi Egypt",
     "Nile Taxi",
     "OTA Uber Moto",
     "Cairo Monorail NRCA",
-    "Robusta Cab",
+    "Robusta Cab"
+  ],
+  "Travel": [
     "Go Bus Egypt",
     "GTS Bus Egypt",
     "E-Asphalt Naguib",
@@ -144,5 +146,17 @@
     "Etisalat Egypt Payroll",
     "Ministry of Finance Salary WPS",
     "Arab Bank Egypt Payroll"
+  ],
+  "Freelance_Work": [
+    "Upwork",
+    "Fiverr",
+    "Freelancer.com",
+    "PeoplePerHour",
+    "Toptal",
+    "Khamsat",
+    "Mostaql",
+    "Guru",
+    "Contra",
+    "Malt"
   ]
 }
