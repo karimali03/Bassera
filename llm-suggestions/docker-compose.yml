@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  baseera-ai:
+    build: .
+    container_name: baseera-ai-service
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./app:/app/app          # live reload in dev via bind mount
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
