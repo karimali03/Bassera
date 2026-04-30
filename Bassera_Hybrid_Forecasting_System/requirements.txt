@@ -1,0 +1,12 @@
+numpy
+pandas
+scikit-learn
+torch
+hijri-converter
+holidays
+plotly
+matplotlib
+seaborn
+shap
+joblib
+kaleido
