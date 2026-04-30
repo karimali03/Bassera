@@ -24,13 +24,12 @@ def plot_balance_forecast(
         and p.get("type") == "income"
         and "salary" in str(p.get("category", "")).lower()
     }
-    installment_days = {
+    fixed_expense_days = {
         int(p["day_of_month"])
         for p in patterns
         if p.get("confidence") in {"high", "medium"}
         and p.get("active")
         and p.get("type") == "expense"
-        and "installment" in str(p.get("category", "")).lower()
     }
 
     fig, ax = plt.subplots(figsize=(12, 5))
@@ -47,14 +46,14 @@ def plot_balance_forecast(
             zorder=3,
         )
 
-    if installment_days:
-        inst_idx = [i for i, d in enumerate(dates) if d.day in installment_days]
+    if fixed_expense_days:
+        inst_idx = [i for i, d in enumerate(dates) if d.day in fixed_expense_days]
         ax.scatter(
             dates.iloc[inst_idx],
             balance.iloc[inst_idx],
             color="#e74c3c",
             s=40,
-            label="Installment day",
+            label="Fixed Expense day",
             zorder=3,
         )
 
@@ -129,6 +128,9 @@ def plot_actual_vs_predicted(
     y_true: Sequence[float],
     y_pred: Sequence[float],
     output_dir: Path,
+    title: str = "Actual vs Predicted Daily Expense (Test Set)",
+    filename: str = "actual_vs_predicted.png",
+    y_label: str = "Expense (EGP)",
 ) -> None:
     ensure_dir(output_dir)
 
@@ -143,14 +145,14 @@ def plot_actual_vs_predicted(
         linestyle="--",
     )
     ax.fill_between(dates_test, y_true, y_pred, alpha=0.1, color="#e74c3c")
-    ax.set_title("Actual vs Predicted Daily Expense (Test Set)")
+    ax.set_title(title)
     ax.set_xlabel("Date")
-    ax.set_ylabel("Expense (EGP)")
+    ax.set_ylabel(y_label)
     ax.grid(alpha=0.3)
     ax.legend()
     plt.tight_layout()
 
-    out_path = output_dir / "actual_vs_predicted.png"
+    out_path = output_dir / filename
     plt.savefig(out_path, dpi=150)
     plt.close()
 

@@ -41,14 +41,21 @@ WORKDAY_LUNCH_PROBABILITY = 0.85
 HOLIDAY_SHOPPING_PROBABILITY = 0.50
 # Number of vacation trips to generate per year
 VACATION_TRIPS_PER_YEAR = (1, 3)
-# Salary credit day (day-of-month). Jitter of ±1 applied automatically.
+# Salary credit days (day-of-month). Jitter of ±1 applied automatically.
 SALARY_DAY = 25
-# Fixed salary amount (BASE_YEAR prices). Kept stable for pattern detection.
-SALARY_AMOUNT_BASE = 20_000
+SALARY_SECONDARY_DAY = 10
+# Fixed salary amounts (BASE_YEAR prices). Kept stable for pattern detection.
+SALARY_PRIMARY_AMOUNT_BASE = 22_000
+SALARY_SECONDARY_AMOUNT_BASE = 14_000
 # Installment toggles
 ENABLE_INSTALLMENTS = True
-INSTALLMENT_DAY = 5
-INSTALLMENT_AMOUNT_BASE = 3_500
+INSTALLMENT_DAYS = (5, 15, 25)
+INSTALLMENT_AMOUNT_BASE = 3_500  # Fallback/default
+INSTALLMENT_AMOUNT_BASES = {
+    5: 3_200,
+    15: 3_600,
+    25: 3_400,
+}
 INSTALLMENT_MERCHANT = "Bank Installment"
 
 # Daily spending stability controls
@@ -866,10 +873,13 @@ def generate_salary_credits(merchants: dict, start: date, end: date) -> list:
     current = date(start.year, start.month, 1)
 
     while current <= end:
-        for s_day, employer_name in [(10, "Secondary Employer"), (SALARY_DAY, "Primary Employer")]:
+        for s_day, employer_name, base_amount in [
+            (SALARY_SECONDARY_DAY, "Secondary Employer", SALARY_SECONDARY_AMOUNT_BASE),
+            (SALARY_DAY, "Primary Employer", SALARY_PRIMARY_AMOUNT_BASE),
+        ]:
             salary_date = apply_jitter(s_day, current.month, current.year, jitter_days=1)
             if start <= salary_date <= end:
-                amount = inflate(SALARY_AMOUNT_BASE, salary_date.year)
+                amount = inflate(base_amount, salary_date.year)
                 txns.append(make_transaction(
                     merchant         = employer_name,
                     category         = "Salary_and_Income",
@@ -925,7 +935,7 @@ def generate_freelance_credits(merchants: dict, start: date, end: date) -> list:
 def generate_installment_debits(start: date, end: date) -> list:
     """
     Emit three fixed installment DEBITs per month on days 5, 15, and 25 (±1 jitter).
-    Amount is fixed to keep a high-confidence pattern.
+    Amounts are fixed per day to keep a high-confidence pattern.
     """
     if not ENABLE_INSTALLMENTS:
         return []
@@ -934,10 +944,11 @@ def generate_installment_debits(start: date, end: date) -> list:
     current = date(start.year, start.month, 1)
 
     while current <= end:
-        for i_day in (5, 15, 25):
+        for i_day in INSTALLMENT_DAYS:
             installment_date = apply_jitter(i_day, current.month, current.year, jitter_days=1)
             if start <= installment_date <= end:
-                amount = inflate(INSTALLMENT_AMOUNT_BASE, installment_date.year)
+                base_amount = INSTALLMENT_AMOUNT_BASES.get(i_day, INSTALLMENT_AMOUNT_BASE)
+                amount = inflate(base_amount, installment_date.year)
                 txns.append(make_transaction(
                     merchant         = f"{INSTALLMENT_MERCHANT} {i_day}",
                     category         = "Installment",

@@ -7,6 +7,7 @@ forecasting model.
 """
 
 import argparse
+from .config import PREDICT_DAYS
 from .pipeline import train_pipeline, infer_pipeline
 from .utils import set_seed
 
@@ -26,6 +27,18 @@ def main() -> None:
         type=str, 
         required=True,
         help="Path to the JSON ledger of transactions."
+    )
+    parser.add_argument(
+        "--starting-balance",
+        type=float,
+        default=None,
+        help="Current account balance for inference (EGP).",
+    )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=PREDICT_DAYS,
+        help="Number of future days to forecast in infer mode.",
     )
     parser.add_argument(
         "--epochs", 

@@ -43,7 +43,9 @@ def _read_json_records(path: Path) -> List[dict]:
     return []
 
 
-def load_and_clean_transactions(user_file: Path, cap_outliers: bool = True) -> pd.DataFrame:
+def load_and_clean_transactions(
+    user_file: "Path | List[dict]", cap_outliers: bool = True
+) -> pd.DataFrame:
     """
     Loads raw transaction JSON data into a cleaned, normalized pandas DataFrame.
     
@@ -52,17 +54,21 @@ def load_and_clean_transactions(user_file: Path, cap_outliers: bool = True) -> p
     carry the correct mathematical signs.
     
     Args:
-        user_file (Path): Path to the input JSON ledger.
+        user_file: Path to the input JSON ledger, OR a pre-loaded list of
+                   transaction dictionaries (used by the API to skip disk I/O).
         cap_outliers (bool): Whether to cap extreme values (99th percentile) to 
                              prevent gradient explosion during GRU training.
                              
     Returns:
         pd.DataFrame: A cleaned DataFrame indexed by timestamp.
     """
-    if not user_file.exists():
-        raise FileNotFoundError(f"User file not found: {user_file}")
-
-    records = _read_json_records(user_file)
+    if isinstance(user_file, list):
+        records = user_file
+    else:
+        user_file = Path(user_file)
+        if not user_file.exists():
+            raise FileNotFoundError(f"User file not found: {user_file}")
+        records = _read_json_records(user_file)
 
     df = pd.DataFrame.from_records(records)
 

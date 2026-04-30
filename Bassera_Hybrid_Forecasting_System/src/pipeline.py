@@ -79,6 +79,195 @@ def _apply_cutoff(df_full: pd.DataFrame) -> tuple[pd.DataFrame, pd.Timestamp]:
     return df_recent, cutoff_date
 
 
+def _extract_starting_balance(user_file: Path) -> float | None:
+    """Reads starting_balance metadata from a ledger JSON file."""
+    try:
+        with open(user_file, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(data, dict) and "transactions" in data:
+        for key in ("starting_balance", "current_balance", "balance"):
+            if key in data and data[key] is not None:
+                try:
+                    return float(data[key])
+                except (TypeError, ValueError):
+                    return None
+    return None
+
+
+def _patterns_from_rules(rules: dict) -> list[dict]:
+    fixed_incomes = rules.get("fixed_incomes", []) or []
+    fixed_expenses = rules.get("fixed_expenses", []) or []
+
+    patterns: list[dict] = []
+
+    def _rule_day(rule: dict) -> int | None:
+        day = rule.get("day_of_month")
+        if isinstance(day, int):
+            return day
+        date_str = rule.get("next_occurrence_date")
+        if date_str:
+            try:
+                return int(str(date_str).split("-")[-1])
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    for rule in fixed_incomes:
+        day = _rule_day(rule)
+        if day is None:
+            continue
+        amount = rule.get("value", rule.get("amount", 0.0))
+        patterns.append(
+            {
+                "category": "salary_and_income",
+                "merchant": str(rule.get("name", "")),
+                "type": "income",
+                "day_of_month": day,
+                "amount": float(amount),
+                "confidence": str(rule.get("confidence", "")).lower(),
+                "active": True,
+            }
+        )
+
+    for rule in fixed_expenses:
+        day = _rule_day(rule)
+        if day is None:
+            continue
+        amount = rule.get("value", rule.get("amount", 0.0))
+        patterns.append(
+            {
+                "category": "fixed_expense",
+                "merchant": str(rule.get("name", "")),
+                "type": "expense",
+                "day_of_month": day,
+                "amount": -abs(float(amount)),
+                "confidence": str(rule.get("confidence", "")).lower(),
+                "active": True,
+            }
+        )
+
+    return patterns
+
+
+def _plot_test_predictions(user_file: Path, output_dir: Path, batch_size: int = 64) -> None:
+    """Rebuild test-set predictions using saved artifacts and plot results."""
+    df_full_capped = load_and_clean_transactions(user_file, cap_outliers=True)
+    df_recent, cutoff_date = _apply_cutoff(df_full_capped)
+
+    df_full_uncapped = load_and_clean_transactions(user_file, cap_outliers=False)
+    df_recent_uncapped = df_full_uncapped[df_full_uncapped["timestamp"] >= cutoff_date].copy()
+
+    patterns_path = ARTIFACT_DIR / "detected_patterns.json"
+    if patterns_path.exists():
+        with open(patterns_path, "r", encoding="utf-8") as fh:
+            patterns = json.load(fh)
+    else:
+        patterns = detect_recurring_patterns(df_recent_uncapped)
+
+    try:
+        df_expense = _filter_stochastic_transactions(df_recent, patterns)
+    except ValueError as exc:
+        print(f"[WARN] Skipping test plots: {exc}")
+        return
+
+    user_stats_path = ARTIFACT_DIR / "user_stats.json"
+    if not user_stats_path.exists():
+        print("[WARN] Skipping test plots: missing artifacts/user_stats.json")
+        return
+
+    with open(user_stats_path, "r", encoding="utf-8") as fh:
+        user_stats = json.load(fh)
+
+    history_start_date = pd.Timestamp(user_stats.get("history_start_date"))
+
+    label_path = ARTIFACT_DIR / "category_label_encoder.npy"
+    if not label_path.exists():
+        print("[WARN] Skipping test plots: missing artifacts/category_label_encoder.npy")
+        return
+
+    normalizer = Normalizer.from_dict(user_stats)
+    label_classes = np.load(label_path, allow_pickle=True)
+
+    df_expense, _, _ = _prepare_features(
+        df_expense, history_start_date, normalizer, label_classes
+    )
+
+    target_dates = make_target_dates(df_expense, WINDOW_DAYS, STEP_DAYS)
+    if len(target_dates) == 0:
+        print("[WARN] Skipping test plots: not enough data to build windows")
+        return
+
+    windows = build_windows(
+        df_expense,
+        FEATURE_COLS,
+        history_start_date,
+        WINDOW_DAYS,
+        MAX_SEQ_LEN,
+        STEP_DAYS,
+    )
+    if not windows:
+        print("[WARN] Skipping test plots: no windows built")
+        return
+
+    x_seq, x_future, y_raw, dates = windows_to_arrays(windows)
+    splits = chronological_split([x_seq, x_future, y_raw, dates])
+    x_seq_test = splits[0][2]
+    x_future_test = splits[1][2]
+    y_test = splits[2][2]
+    dates_test = splits[3][2]
+
+    if len(x_seq_test) == 0:
+        print("[WARN] Skipping test plots: empty test split")
+        return
+
+    test_loader = _build_dataloaders(x_seq_test, x_future_test, y_test, batch_size)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = FinanceForecaster(
+        input_size=len(FEATURE_COLS),
+        future_size=len(FUTURE_FEATURE_COLS),
+        hidden_size=128,
+        num_layers=2,
+        dropout=0.2,
+    ).to(device)
+
+    checkpoint_path = ARTIFACT_DIR / "best_model.pt"
+    if not checkpoint_path.exists():
+        print("[WARN] Skipping test plots: missing artifacts/best_model.pt")
+        return
+
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+
+    preds, targets = predict_on_loader(model, test_loader, device)
+    preds_exp = np.expm1(preds[:, 0])
+    targets_exp = np.expm1(targets[:, 0])
+    preds_inc = np.expm1(preds[:, 1])
+    targets_inc = np.expm1(targets[:, 1])
+
+    plot_actual_vs_predicted(
+        dates_test,
+        targets_exp,
+        preds_exp,
+        output_dir,
+        title="Actual vs Predicted Daily Expense (Test Set)",
+        filename="actual_vs_predicted_expense.png",
+        y_label="Expense (EGP)",
+    )
+
+    plot_actual_vs_predicted(
+        dates_test,
+        targets_inc,
+        preds_inc,
+        output_dir,
+        title="Actual vs Predicted Daily Income (Test Set)",
+        filename="actual_vs_predicted_income.png",
+        y_label="Income (EGP)",
+    )
+
+
 def _filter_stochastic_transactions(df: pd.DataFrame, patterns: list[dict]) -> pd.DataFrame:
     """
     Strips out transactions that match our highly-confident, deterministic 
@@ -162,17 +351,12 @@ def _print_forecast_summary(trajectory_df: pd.DataFrame, patterns: list[dict]) -
         and p.get("type") == "income"
         and "salary" in str(p.get("category", "")).lower()
     ]
-    installment_patterns = [
+    fixed_expense_patterns = [
         p
         for p in patterns
         if p.get("confidence") in {"high", "medium"}
         and p.get("active")
         and p.get("type") == "expense"
-        and (
-            "installment" in str(p.get("category", "")).lower()
-            or "services" in str(p.get("category", "")).lower()
-            or "health" in str(p.get("category", "")).lower()
-        )
     ]
 
     if not salary_patterns:
@@ -183,12 +367,12 @@ def _print_forecast_summary(trajectory_df: pd.DataFrame, patterns: list[dict]) -
             for p in salary_patterns
         ]
 
-    if not installment_patterns:
-        installment_lines = [" Installments      : none detected"]
+    if not fixed_expense_patterns:
+        fixed_expense_lines = [" Fixed Expenses    : none detected"]
     else:
-        installment_lines = [
-            f" Installment       : day {p['day_of_month']} ({p['merchant']}) -{abs(float(p['amount'])):,.0f} EGP [{p['confidence'].upper()}]"
-            for p in installment_patterns
+        fixed_expense_lines = [
+            f" Fixed Expense     : day {p['day_of_month']} ({p['merchant']}) -{abs(float(p['amount'])):,.0f} EGP [{p['confidence'].upper()}]"
+            for p in fixed_expense_patterns
         ]
 
     print("\n" + "=" * 46)
@@ -204,7 +388,7 @@ def _print_forecast_summary(trajectory_df: pd.DataFrame, patterns: list[dict]) -
     for line in salary_lines:
         print(line)
     print("-" * 46)
-    for line in installment_lines:
+    for line in fixed_expense_lines:
         print(line)
     print("=" * 46 + "\n")
 
@@ -344,8 +528,27 @@ def train_pipeline(args: argparse.Namespace) -> None:
         f"| MAPE: {mape_i:.1f}% | sMAPE: {smape_i:.1f}% | R2: {r2_i:.4f}"
     )
 
-    # Plot just the expense curve for backwards compatibility with the plotting function
-    plot_actual_vs_predicted(dates_test, targets_exp, preds_exp, PLOTS_DIR)
+    # Plot the expense curve
+    plot_actual_vs_predicted(
+        dates_test,
+        targets_exp,
+        preds_exp,
+        PLOTS_DIR,
+        title="Actual vs Predicted Daily Expense (Test Set)",
+        filename="actual_vs_predicted_expense.png",
+        y_label="Expense (EGP)",
+    )
+
+    # Plot the income curve
+    plot_actual_vs_predicted(
+        dates_test,
+        targets_inc,
+        preds_inc,
+        PLOTS_DIR,
+        title="Actual vs Predicted Daily Income (Test Set)",
+        filename="actual_vs_predicted_income.png",
+        y_label="Income (EGP)",
+    )
 
     save_json(FEATURE_COLS, ARTIFACT_DIR / "feature_cols.json")
     save_json(FUTURE_FEATURE_COLS, ARTIFACT_DIR / "future_feature_cols.json")
@@ -363,36 +566,33 @@ def train_pipeline(args: argparse.Namespace) -> None:
     print("\nTraining completed. Artifacts saved.")
 
 
-def infer_pipeline(args: argparse.Namespace) -> None:
+def generate_forecast(
+    transactions: "list[dict] | Path",
+    horizon_days: int = PREDICT_DAYS,
+    starting_balance: float | None = None,
+) -> dict:
     """
-    Executes the trained model to generate the next 30 days of cash flow predictions.
-    
-    Aggregates deterministic rules directly onto the timeline and overlays the GRU's
-    stochastic daily expense predictions to derive the absolute Net Balance.
+    Core inference function that produces the full forecast payload.
+
+    Can be called from the CLI (with a Path) or the API (with a list of dicts).
 
     Args:
-        args: Argparse namespace containing config parameters.
+        transactions: Either a file path to the JSON ledger or a list of raw
+                      transaction dictionaries.
+        horizon_days: Number of future days to predict.
+        starting_balance: Current account balance to start the forecast.
+
+    Returns:
+        A dictionary containing metadata, summary, warnings, rules, and
+        the day-by-day forecast array.
     """
-    ensure_dir(ARTIFACT_DIR)
-    ensure_dir(OUTPUT_DIR)
-    ensure_dir(PLOTS_DIR)
-
-    user_file = Path(args.user_file).expanduser()
-    df_full_capped = load_and_clean_transactions(user_file, cap_outliers=True)
+    df_full_capped = load_and_clean_transactions(transactions, cap_outliers=True)
     df_recent, cutoff_date = _apply_cutoff(df_full_capped)
-    print(
-        f"Data cutoff: using last {DATA_CUTOFF_MONTHS} months "
-        f"({len(df_recent)} of {len(df_full_capped)} transactions, "
-        f"from {df_recent['timestamp'].min().date()})"
-    )
 
-    df_full_uncapped = load_and_clean_transactions(user_file, cap_outliers=False)
+    df_full_uncapped = load_and_clean_transactions(transactions, cap_outliers=False)
     df_recent_uncapped = df_full_uncapped[df_full_uncapped["timestamp"] >= cutoff_date].copy()
 
     patterns = detect_recurring_patterns(df_recent_uncapped)
-    print(format_patterns_summary(patterns))
-    save_json(patterns, ARTIFACT_DIR / "detected_patterns.json")
-    plot_detected_patterns_summary(patterns, PLOTS_DIR)
 
     df_expense = _filter_stochastic_transactions(df_recent, patterns)
 
@@ -427,25 +627,191 @@ def infer_pipeline(args: argparse.Namespace) -> None:
 
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
 
-    starting_balance = float(df_full_uncapped["amount"].sum())
+    if starting_balance is None:
+        raise ValueError(
+            "starting_balance is required. Provide it via the input JSON or CLI."
+        )
+    starting_balance = float(starting_balance)
     trajectory = forecast_trajectory(
         model,
         df_expense,
         patterns,
         history_start_date,
         starting_balance,
-        PREDICT_DAYS,
+        horizon_days,
         FEATURE_COLS,
         WINDOW_DAYS,
         MAX_SEQ_LEN,
         device,
     )
 
+    # --- Build the response payload ---
+    last_transaction_date = df_full_uncapped["timestamp"].max().normalize()
+    forecast_start = trajectory["date"].iloc[0]
+    forecast_end = trajectory["date"].iloc[-1]
+
+    # Load model metrics if available
+    metrics_path = ARTIFACT_DIR / "test_metrics.json"
+    model_mae = None
+    if metrics_path.exists():
+        with open(metrics_path, "r", encoding="utf-8") as fh:
+            metrics = json.load(fh)
+            model_mae = metrics.get("expense_mae")
+
+    # Summary
+    total_income = float(trajectory["total_income"].sum())
+    total_expense = float(trajectory["total_expense"].sum())
+    net_cash_flow = total_income - total_expense
+    projected_ending_balance = float(trajectory["projected_balance"].iloc[-1])
+
+    # Rules
+    usable_patterns = [
+        p for p in patterns
+        if p.get("confidence") in {"high", "medium"} and p.get("active")
+    ]
+
+    def _next_occurrence(day_of_month: int, from_date: pd.Timestamp) -> str:
+        """Returns the next calendar date when this day_of_month occurs."""
+        # Try this month first
+        try:
+            candidate = from_date.replace(day=day_of_month)
+        except ValueError:
+            # day doesn't exist in this month (e.g., day 31 in April)
+            candidate = (from_date + pd.offsets.MonthEnd(0)).replace(day=1) + pd.DateOffset(months=1)
+            candidate = candidate.replace(day=day_of_month)
+        # If that day already passed this month, move to next month
+        if candidate < from_date:
+            candidate = candidate + pd.DateOffset(months=1)
+        return candidate.strftime("%Y-%m-%d")
+
+    forecast_start_ts = pd.Timestamp(trajectory["date"].iloc[0])
+
+    fixed_incomes = [
+        {
+            "name": p.get("merchant", p.get("category", "")),
+            "day_of_month": int(p["day_of_month"]),
+            "next_occurrence_date": _next_occurrence(int(p["day_of_month"]), forecast_start_ts),
+            "value": abs(float(p["amount"])),
+            "confidence": str(p["confidence"]).upper(),
+        }
+        for p in usable_patterns if p.get("type") == "income"
+    ]
+    fixed_expenses = [
+        {
+            "name": p.get("merchant", p.get("category", "")),
+            "day_of_month": int(p["day_of_month"]),
+            "next_occurrence_date": _next_occurrence(int(p["day_of_month"]), forecast_start_ts),
+            "value": abs(float(p["amount"])),
+            "confidence": str(p["confidence"]).upper(),
+        }
+        for p in usable_patterns if p.get("type") == "expense"
+    ]
+
+
+    # Warnings
+    warnings = []
+    for _, row in trajectory.iterrows():
+        if row["projected_balance"] < 0:
+            warnings.append({
+                "date": row["date"].strftime("%Y-%m-%d"),
+                "type": "NEGATIVE_BALANCE",
+                "message": f"Projected balance drops to {row['projected_balance']:,.0f} EGP.",
+            })
+        elif row["projected_balance"] < starting_balance * 0.1:
+            warnings.append({
+                "date": row["date"].strftime("%Y-%m-%d"),
+                "type": "LOW_BALANCE",
+                "message": f"Projected balance drops to {row['projected_balance']:,.0f} EGP.",
+            })
+
+    # Daily forecast array
+    daily_forecast = []
+    for _, row in trajectory.iterrows():
+        daily_forecast.append({
+            "date": row["date"].strftime("%Y-%m-%d"),
+            "dynamic_income": round(float(row.get("gru_income", 0.0)), 2),
+            "fixed_income": round(float(row["rule_income"]), 2),
+            "total_income": round(float(row["total_income"]), 2),
+            "dynamic_expense": round(float(row["gru_expense"]), 2),
+            "fixed_expense": round(float(row["rule_expense"]), 2),
+            "total_expense": round(float(row["total_expense"]), 2),
+            "net_cash_flow": round(float(row["net"]), 2),
+            "projected_balance": round(float(row["projected_balance"]), 2),
+        })
+
+    return {
+        "metadata": {
+            "forecast_horizon_days": horizon_days,
+            "last_transaction_date": last_transaction_date.strftime("%Y-%m-%d"),
+            "forecast_start_date": forecast_start.strftime("%Y-%m-%d"),
+            "forecast_end_date": forecast_end.strftime("%Y-%m-%d"),
+            "model_mae_egp": model_mae,
+        },
+        "summary": {
+            "starting_balance": round(starting_balance, 2),
+            "projected_ending_balance": round(projected_ending_balance, 2),
+            "net_cash_flow": round(net_cash_flow, 2),
+            "total_income": round(total_income, 2),
+            "total_expense": round(total_expense, 2),
+        },
+        "warnings": warnings,
+        "rules": {
+            "fixed_incomes": fixed_incomes,
+            "fixed_expenses": fixed_expenses,
+        },
+        "daily_forecast": daily_forecast,
+    }
+
+
+def infer_pipeline(args: argparse.Namespace) -> None:
+    """
+    CLI wrapper around generate_forecast. Saves CSV, plots, and prints summary.
+
+    Args:
+        args: Argparse namespace containing config parameters.
+    """
+    ensure_dir(ARTIFACT_DIR)
+    ensure_dir(OUTPUT_DIR)
+    ensure_dir(PLOTS_DIR)
+
+    user_file = Path(args.user_file).expanduser()
+    starting_balance = getattr(args, "starting_balance", None)
+    horizon_days = getattr(args, "horizon", None) or PREDICT_DAYS
+    if starting_balance is None:
+        starting_balance = _extract_starting_balance(user_file)
+    result = generate_forecast(
+        user_file,
+        horizon_days,
+        starting_balance=starting_balance,
+    )
+
+    forecast_json_path = OUTPUT_DIR / "forecast_result.json"
+    save_json(result, forecast_json_path)
+
+    with open(forecast_json_path, "r", encoding="utf-8") as fh:
+        saved_result = json.load(fh)
+
+    # Rebuild trajectory DataFrame for plotting from the API payload
+    trajectory = pd.DataFrame(saved_result["daily_forecast"])
+    trajectory["date"] = pd.to_datetime(trajectory["date"])
+    trajectory.rename(columns={
+        "fixed_income": "rule_income",
+        "fixed_expense": "rule_expense",
+        "dynamic_expense": "gru_expense",
+        "dynamic_income": "gru_income",
+        "net_cash_flow": "net",
+    }, inplace=True)
+
     forecast_path = OUTPUT_DIR / "forecast.csv"
     trajectory.to_csv(forecast_path, index=False)
 
-    plot_balance_forecast(trajectory, patterns, PLOTS_DIR)
+    plot_patterns = _patterns_from_rules(saved_result.get("rules", {}))
+    plot_balance_forecast(trajectory, plot_patterns, PLOTS_DIR)
     plot_daily_cashflow(trajectory, PLOTS_DIR)
 
-    _print_forecast_summary(trajectory, patterns)
+    _plot_test_predictions(user_file, PLOTS_DIR)
+
+    summary_patterns = _patterns_from_rules(saved_result.get("rules", {}))
+    _print_forecast_summary(trajectory, summary_patterns)
     print("Done. Forecast and plots saved.")
+
