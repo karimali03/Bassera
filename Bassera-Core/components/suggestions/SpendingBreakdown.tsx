@@ -9,18 +9,30 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  Cell,
 } from "recharts";
 import { Card } from "@/components/ui/Card";
 import { SpendingCategory } from "@/lib/types";
+import { getCategoryColor } from "@/lib/constants";
 
 interface SpendingBreakdownProps {
-  categories: SpendingCategory[];
+  categories?: SpendingCategory[];
 }
 
 export function SpendingBreakdown({ categories }: SpendingBreakdownProps) {
+  if (!categories || categories.length === 0) {
+    return (
+      <Card className="p-6 mb-6">
+        <h3 className="text-lg font-bold mb-4">Spending Breakdown</h3>
+        <p className="text-rev-muted">No spending data available</p>
+      </Card>
+    );
+  }
+
   const chartData = categories.map((cat) => ({
     name: cat.category.replace(/_/g, " "),
-    percentage: Math.round(cat.percentage_of_debits),
+    category: cat.category,
+    percentage: Math.round(cat.percentage_of_debits * 100),
   }));
 
   return (
@@ -44,7 +56,11 @@ export function SpendingBreakdown({ categories }: SpendingBreakdownProps) {
             }}
             formatter={(value: any) => `${value}%`}
           />
-          <Bar dataKey="percentage" fill="#494fdf" radius={[0, 8, 8, 0]} />
+          <Bar dataKey="percentage" radius={[0, 8, 8, 0]}>
+            {chartData.map((entry, index) => (
+              <Cell key={`cell-${index}`} fill={getCategoryColor(entry.category)} />
+            ))}
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </Card>

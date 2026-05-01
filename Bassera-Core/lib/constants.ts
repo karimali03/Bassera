@@ -2,31 +2,29 @@ export const BANK_ID = "BANK-KARIM-001";
 
 export const CATEGORY_COLORS: Record<string, string> = {
   Groceries: "#00a87e",
-  Restaurants: "#ec7e00",
+  Food_and_Dining: "#ec7e00",
   Transportation: "#494fdf",
   Shopping: "#e61e49",
-  Utilities: "#505a63",
+  Services_and_Utilities: "#505a63",
   Entertainment: "#b09000",
-  Healthcare: "#e23b4a",
-  Insurance: "#8d969e",
-  Salary: "#00a87e",
-  Investments: "#494fdf",
-  Rent: "#191c1f",
+  Health_and_Pharmacy: "#e23b4a",
+  Installment: "#8d969e",
+  Salary_and_Income: "#00a87e",
+  Travel: "#007bc2",
   Other: "#c9c9cd",
 };
 
 export const CATEGORY_DISPLAY_NAMES: Record<string, string> = {
   Groceries: "🛒 Groceries",
-  Restaurants: "🍽️ Restaurants",
+  Food_and_Dining: "🍽️ Food & Dining",
   Transportation: "🚗 Transportation",
   Shopping: "🛍️ Shopping",
-  Utilities: "💡 Utilities",
+  Services_and_Utilities: "💡 Utilities",
   Entertainment: "🎬 Entertainment",
-  Healthcare: "🏥 Healthcare",
-  Insurance: "🛡️ Insurance",
-  Salary: "💰 Salary",
-  Investments: "📈 Investments",
-  Rent: "🏠 Rent",
+  Health_and_Pharmacy: "🏥 Health & Pharmacy",
+  Installment: "💳 Installment",
+  Salary_and_Income: "💰 Salary",
+  Travel: "✈️ Travel",
   Other: "📦 Other",
 };
 
