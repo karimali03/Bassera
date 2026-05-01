@@ -1,3 +1,12 @@
+---
+title: Bassera Hybrid Forecasting System
+emoji: 📈
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+---
+
 # Baseera: Advanced Personal Finance Forecaster
 
 **Baseera** is a hybrid Machine Learning pipeline designed to forecast a user's 30-day financial balance trajectory with high accuracy. 
@@ -182,6 +191,50 @@ The function detects recurring patterns (using the same 18-month window as the m
     }
   ]
 }
+}
+```
+
+### REST API (Hugging Face Space)
+
+Baseera is also deployed as a live REST API on Hugging Face Spaces. You can send a payload containing your `starting_balance`, `horizon_days`, and your raw `transactions` to the `/analyze` endpoint to receive both the 30-day forecast and the preprocessed historical summary.
+
+#### Using `curl` & `jq` (Terminal)
+If you have a large `generated_ledger.json` file, you can use `jq` to wrap it in the required payload structure and pipe it to the API:
+
+```bash
+jq '{starting_balance: 250000, horizon_days: 30, transactions: .}' data/generated_ledger.json \
+  | curl -X POST https://mo7amed20o03-bassera-hybrid-forecasting-system.hf.space/analyze \
+  -H "Content-Type: application/json" \
+  -d @- -o outputs/live_api_response.json
+```
+
+#### Using Python
+```python
+import json
+import requests
+
+# 1. Load your raw transaction list
+with open('data/generated_ledger.json', 'r') as f:
+    ledger = json.load(f)
+
+# 2. Build the API payload
+payload = {
+    "starting_balance": 250000,
+    "horizon_days": 30,
+    "transactions": ledger
+}
+
+# 3. Send the request
+url = 'https://mo7amed20o03-bassera-hybrid-forecasting-system.hf.space/analyze'
+response = requests.post(url, json=payload)
+
+# 4. Extract the results
+if response.status_code == 200:
+    data = response.json()
+    print("Forecast summary:", data["forecast"]["summary"])
+    print("Detected fixed patterns:", data["summary"]["metadata"]["fixed_patterns"])
+else:
+    print(f"Error {response.status_code}: {response.text}")
 ```
 
 ---
