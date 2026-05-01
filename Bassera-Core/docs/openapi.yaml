@@ -1,0 +1,450 @@
+openapi: 3.1.0
+info:
+  title: FastAPI
+  version: 0.1.0
+paths:
+  /api/users/:
+    get:
+      tags:
+        - Users
+      summary: Get All Users
+      operationId: get_all_users_api_users__get
+      responses:
+        200:
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: #/components/schemas/UserResponse
+                type: array
+                title: Response Get All Users Api Users  Get
+    post:
+      tags:
+        - Users
+      summary: Create User
+      operationId: create_user_api_users__post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: #/components/schemas/UserCreate
+        required: True
+      responses:
+        200:
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/UserResponse
+        422:
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/HTTPValidationError
+  /api/users/{user_id}:
+    get:
+      tags:
+        - Users
+      summary: Get User By Id
+      operationId: get_user_by_id_api_users__user_id__get
+      parameters:
+        -
+          name: user_id
+          in: path
+          required: True
+          schema:
+            type: string
+            title: User Id
+      responses:
+        200:
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/UserResponse
+        422:
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/HTTPValidationError
+    put:
+      tags:
+        - Users
+      summary: Update User
+      operationId: update_user_api_users__user_id__put
+      parameters:
+        -
+          name: user_id
+          in: path
+          required: True
+          schema:
+            type: string
+            title: User Id
+      requestBody:
+        required: True
+        content:
+          application/json:
+            schema:
+              $ref: #/components/schemas/UserUpdate
+      responses:
+        200:
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/UserResponse
+        422:
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/HTTPValidationError
+    delete:
+      tags:
+        - Users
+      summary: Delete User
+      operationId: delete_user_api_users__user_id__delete
+      parameters:
+        -
+          name: user_id
+          in: path
+          required: True
+          schema:
+            type: string
+            title: User Id
+      responses:
+        200:
+          description: Successful Response
+          content:
+            application/json:
+              schema:{}
+        422:
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/HTTPValidationError
+  /bank/:
+    post:
+      tags:
+        - Bank
+      summary: Create Bank Profile
+      operationId: create_bank_profile_bank__post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: #/components/schemas/BankCreate
+        required: True
+      responses:
+        201:
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/BankResponse
+        422:
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/HTTPValidationError
+  /bank/{bank_id}:
+    get:
+      tags:
+        - Bank
+      summary: Get Bank Profile
+      operationId: get_bank_profile_bank__bank_id__get
+      parameters:
+        -
+          name: bank_id
+          in: path
+          required: True
+          schema:
+            type: string
+            title: Bank Id
+      responses:
+        200:
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/BankResponse
+        422:
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/HTTPValidationError
+  /bank/{bank_id}/transactions:
+    post:
+      tags:
+        - Bank
+      summary: Add Transaction
+      operationId: add_transaction_bank__bank_id__transactions_post
+      parameters:
+        -
+          name: bank_id
+          in: path
+          required: True
+          schema:
+            type: string
+            title: Bank Id
+      requestBody:
+        required: True
+        content:
+          application/json:
+            schema:
+              $ref: #/components/schemas/TransactionCreate
+      responses:
+        201:
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/TransactionResponse
+        422:
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/HTTPValidationError
+    get:
+      tags:
+        - Bank
+      summary: Get Transactions
+      operationId: get_transactions_bank__bank_id__transactions_get
+      parameters:
+        -
+          name: bank_id
+          in: path
+          required: True
+          schema:
+            type: string
+            title: Bank Id
+      responses:
+        200:
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: #/components/schemas/TransactionResponse
+                title: Response Get Transactions Bank  Bank Id  Transactions Get
+        422:
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: #/components/schemas/HTTPValidationError
+components:
+  schemas:
+    BankCreate:
+      properties:
+        bank_id:
+          type: string
+          title: Bank Id
+      type: object
+      required:
+        - bank_id
+      title: BankCreate
+    BankResponse:
+      properties:
+        _id:
+          type: string
+          title: Id
+        bank_id:
+          type: string
+          title: Bank Id
+        balance:
+          type: number
+          title: Balance
+          default: 0.0
+        transactions:
+          items:
+            $ref: #/components/schemas/TransactionResponse
+          type: array
+          title: Transactions
+          default:[]
+      type: object
+      required:
+        - _id
+        - bank_id
+      title: BankResponse
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: #/components/schemas/ValidationError
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    TransactionCreate:
+      properties:
+        merchant:
+          type: string
+          title: Merchant
+        category:
+          type: string
+          title: Category
+        amount:
+          type: number
+          title: Amount
+        currency:
+          type: string
+          title: Currency
+          default: EGP
+        type:
+          type: string
+          title: Type
+        note:
+          anyOf:
+            -
+              type: string
+            -
+              type: null
+          title: Note
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+      type: object
+      required:
+        - merchant
+        - category
+        - amount
+        - type
+        - timestamp
+      title: TransactionCreate
+    TransactionResponse:
+      properties:
+        merchant:
+          type: string
+          title: Merchant
+        category:
+          type: string
+          title: Category
+        amount:
+          type: number
+          title: Amount
+        currency:
+          type: string
+          title: Currency
+          default: EGP
+        type:
+          type: string
+          title: Type
+        note:
+          anyOf:
+            -
+              type: string
+            -
+              type: null
+          title: Note
+        timestamp:
+          type: string
+          format: date-time
+          title: Timestamp
+        transaction_id:
+          type: string
+          title: Transaction Id
+      type: object
+      required:
+        - merchant
+        - category
+        - amount
+        - type
+        - timestamp
+        - transaction_id
+      title: TransactionResponse
+    UserCreate:
+      properties:
+        fname:
+          type: string
+          title: Fname
+        lname:
+          type: string
+          title: Lname
+        bank_id:
+          type: string
+          title: Bank Id
+      type: object
+      required:
+        - fname
+        - lname
+        - bank_id
+      title: UserCreate
+    UserResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        fname:
+          type: string
+          title: Fname
+        lname:
+          type: string
+          title: Lname
+        bank_id:
+          type: string
+          title: Bank Id
+      type: object
+      required:
+        - id
+        - fname
+        - lname
+        - bank_id
+      title: UserResponse
+    UserUpdate:
+      properties:
+        fname:
+          anyOf:
+            -
+              type: string
+            -
+              type: null
+          title: Fname
+        lname:
+          anyOf:
+            -
+              type: string
+            -
+              type: null
+          title: Lname
+        bank_id:
+          anyOf:
+            -
+              type: string
+            -
+              type: null
+          title: Bank Id
+      type: object
+      title: UserUpdate
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+              -
+                type: string
+              -
+                type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      title: ValidationError
