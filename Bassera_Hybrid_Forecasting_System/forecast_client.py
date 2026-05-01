@@ -15,7 +15,7 @@ from typing import Optional
 # Add project root to path so we can import src
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.pipeline import generate_forecast
+from src.pipeline import generate_forecast, generate_preprocessed_summary
 
 
 def _rule_day_value(rule: dict) -> Optional[int]:
@@ -122,6 +122,18 @@ def main():
         json.dump(result, f, indent=2, ensure_ascii=False)
 
     print(f"[INFO] Forecast written to: {output_path}")
+
+    # --- Generate preprocessed summary ---
+    print("[INFO] Generating preprocessed summary...")
+    preprocess_result = generate_preprocessed_summary(
+        transactions=transactions,
+        source_label=input_path.name,
+    )
+    preprocess_path = output_path.parent / "preprocessed_summary.json"
+    preprocess_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(preprocess_path, "w", encoding="utf-8") as f:
+        json.dump(preprocess_result, f, indent=2, ensure_ascii=False)
+    print(f"[INFO] Preprocessed summary written to: {preprocess_path}")
 
     # --- Print a quick summary to console ---
     meta = result["metadata"]

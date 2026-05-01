@@ -10,3 +10,6 @@ seaborn
 shap
 joblib
 kaleido
+fastapi
+uvicorn[standard]
+pydantic
