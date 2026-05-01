@@ -2,41 +2,74 @@
 @tailwind components;
 @tailwind utilities;
 
-
-
-:root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 214, 219, 220;
-  --background-end-rgb: 255, 255, 255;
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --foreground-rgb: 255, 255, 255;
-    --background-start-rgb: 0, 0, 0;
-    --background-end-rgb: 0, 0, 0;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  @apply bg-rev-dark text-white;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-.task-head{
-  justify-content: space-between;
-  flex-direction: row;
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-.error-connection {
-  display: flex;
-  width: 100vw;
-  justify-content: center;
-  align-items: center;
-  color: red;
+::-webkit-scrollbar-track {
+  background: #1e2225;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #505a63;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #8d969e;
+}
+
+/* Utility classes */
+.card {
+  @apply bg-card rounded-card shadow-none border border-rev-border/20;
+}
+
+.pill-primary {
+  @apply bg-rev-dark text-rev-white rounded-pill px-8 py-3 transition-opacity;
+}
+
+.pill-primary:hover {
+  opacity: 0.85;
+}
+
+.pill-secondary {
+  @apply bg-rev-surface text-rev-dark rounded-pill px-8 py-3 transition-opacity;
+}
+
+.pill-secondary:hover {
+  opacity: 0.85;
+}
+
+.pill-outline {
+  @apply bg-transparent text-rev-dark rounded-pill px-8 py-3 border-2 border-rev-dark transition-opacity;
+}
+
+.pill-outline:hover {
+  opacity: 0.85;
+}
+
+.pill-ghost {
+  @apply bg-white/10 text-rev-surface rounded-pill px-8 py-3 border-2 border-rev-surface transition-opacity;
+}
+
+.pill-ghost:hover {
+  opacity: 0.85;
 }
