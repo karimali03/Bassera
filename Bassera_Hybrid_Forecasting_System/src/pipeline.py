@@ -566,6 +566,145 @@ def train_pipeline(args: argparse.Namespace) -> None:
     print("\nTraining completed. Artifacts saved.")
 
 
+def generate_preprocessed_summary(
+    transactions: "list[dict] | Path",
+    source_label: str | None = None,
+) -> dict:
+    """
+    Produces a structured daily summary of historical transactions, grouped
+    by day → category → merchant, with fixed vs dynamic breakdowns.
+
+    Uses the full (uncapped) ledger so outliers are visible in the audit trail.
+    Patterns are detected with the same rule detector used during training.
+
+    Args:
+        transactions: Either a file path to the JSON ledger or a list of raw
+                      transaction dictionaries.
+        source_label: Human-readable label for the source (e.g. filename).
+
+    Returns:
+        A dictionary matching the preprocessed_summary.json schema.
+    """
+    from datetime import datetime, timezone
+
+    # --- Load & clean (uncapped to preserve true amounts) ---
+    df = load_and_clean_transactions(transactions, cap_outliers=False)
+
+    # --- Detect recurring patterns on the recent window ---
+    # The same DATA_CUTOFF_MONTHS used by the model pipeline is applied here
+    # so that inflation drift over 6+ years doesn't suppress pattern confidence.
+    cutoff_date = df["timestamp"].max() - pd.DateOffset(months=DATA_CUTOFF_MONTHS)
+    df_recent = df[df["timestamp"] >= cutoff_date].copy()
+    patterns = detect_recurring_patterns(df_recent)
+
+    # Build a lookup set of (category, merchant) pairs that are "fixed"
+    fixed_pairs: set[tuple[str, str]] = {
+        (p["category"], p["merchant"])
+        for p in patterns
+        if p.get("confidence") in {"high", "medium"} and p.get("active")
+    }
+
+    # --- Trim to last 12 months for the daily output ---
+    summary_cutoff = df["timestamp"].max() - pd.DateOffset(months=12)
+    df = df[df["timestamp"] >= summary_cutoff].copy()
+
+    # --- Tag every transaction ---
+    df["is_fixed"] = df.apply(
+        lambda row: (row["category"], row["merchant"]) in fixed_pairs, axis=1
+    )
+    df["date"] = df["timestamp"].dt.normalize()
+
+    # --- Aggregate daily → category → merchant ---
+    daily_records: list[dict] = []
+
+    for date_val, day_group in df.groupby("date"):
+        day_totals = _aggregate_totals(day_group)
+
+        category_records: list[dict] = []
+        for cat, cat_group in day_group.groupby("category"):
+            cat_totals = _aggregate_totals(cat_group)
+
+            merchant_records: list[dict] = []
+            for merch, merch_group in cat_group.groupby("merchant"):
+                merch_totals = _aggregate_totals(merch_group)
+                merchant_records.append({
+                    "merchant": merch,
+                    **merch_totals,
+                })
+
+            category_records.append({
+                "category": cat,
+                **cat_totals,
+                "merchants": merchant_records,
+            })
+
+        daily_records.append({
+            "date": pd.Timestamp(date_val).strftime("%Y-%m-%d"),
+            "totals": day_totals,
+            "categories": category_records,
+        })
+
+    # --- Build metadata ---
+    if source_label is None:
+        if isinstance(transactions, (str, Path)):
+            source_label = Path(transactions).name
+        else:
+            source_label = "in_memory_transactions"
+
+    start_date = df["timestamp"].min().strftime("%Y-%m-%d")
+    end_date = df["timestamp"].max().strftime("%Y-%m-%d")
+    num_days = df["date"].nunique()
+
+    return {
+        "metadata": {
+            "source_file": source_label,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "start_date": start_date,
+            "end_date": end_date,
+            "total_transactions": len(df),
+            "days": num_days,
+            "fixed_patterns": len(fixed_pairs),
+        },
+        "daily": daily_records,
+    }
+
+
+def _aggregate_totals(group: pd.DataFrame) -> dict:
+    """
+    Computes fixed/dynamic income/expense totals for a group of transactions.
+
+    Args:
+        group: A subset of the transaction DataFrame (already tagged with 'is_fixed').
+
+    Returns:
+        A dict with total_income, total_expense, net, fixed/dynamic splits,
+        and transaction_count.
+    """
+    income_mask = group["amount"] > 0
+    expense_mask = group["amount"] < 0
+    fixed_mask = group["is_fixed"]
+
+    total_income = round(float(group.loc[income_mask, "amount"].sum()), 2)
+    total_expense = round(float(group.loc[expense_mask, "amount"].abs().sum()), 2)
+
+    fixed_income = round(float(group.loc[income_mask & fixed_mask, "amount"].sum()), 2)
+    dynamic_income = round(float(group.loc[income_mask & ~fixed_mask, "amount"].sum()), 2)
+
+    fixed_expense = round(float(group.loc[expense_mask & fixed_mask, "amount"].abs().sum()), 2)
+    dynamic_expense = round(float(group.loc[expense_mask & ~fixed_mask, "amount"].abs().sum()), 2)
+
+    return {
+        "total_income": total_income,
+        "total_expense": total_expense,
+        "net": round(total_income - total_expense, 2),
+        "fixed_income": fixed_income,
+        "dynamic_income": dynamic_income,
+        "fixed_expense": fixed_expense,
+        "dynamic_expense": dynamic_expense,
+        "transaction_count": len(group),
+    }
+
+
 def generate_forecast(
     transactions: "list[dict] | Path",
     horizon_days: int = PREDICT_DAYS,
@@ -813,5 +952,12 @@ def infer_pipeline(args: argparse.Namespace) -> None:
 
     summary_patterns = _patterns_from_rules(saved_result.get("rules", {}))
     _print_forecast_summary(trajectory, summary_patterns)
+
+    # --- Generate preprocessed summary ---
+    preprocess_result = generate_preprocessed_summary(user_file)
+    preprocess_path = OUTPUT_DIR / "preprocessed_summary.json"
+    save_json(preprocess_result, preprocess_path)
+    print(f"Preprocessed summary saved to {preprocess_path}")
+
     print("Done. Forecast and plots saved.")
 

@@ -1,3 +1,12 @@
+---
+title: Bassera Hybrid Forecasting System
+emoji: 📈
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+---
+
 # Baseera: Advanced Personal Finance Forecaster
 
 **Baseera** is a hybrid Machine Learning pipeline designed to forecast a user's 30-day financial balance trajectory with high accuracy. 
@@ -127,13 +136,116 @@ The function accepts either a file `Path` or a `List[dict]` of raw transactions 
 }
 ```
 
+### Preprocessed Summary (`generate_preprocessed_summary`)
+
+In addition to the forecast, Baseera can produce a structured daily audit trail of the last 12 months of cleaned historical transactions, grouped by **day → category → merchant**, with fixed vs dynamic breakdowns:
+
+```python
+from src.pipeline import generate_preprocessed_summary
+
+# Pass a file path or list of transaction dicts
+summary = generate_preprocessed_summary(transactions=list_of_dicts)
+```
+
+The function detects recurring patterns (using the same 18-month window as the model), tags every transaction as **fixed** (salary, subscription, installment) or **dynamic** (groceries, transport, dining), then aggregates:
+
+```json
+{
+  "metadata": {
+    "source_file": "generated_ledger.json",
+    "generated_at": "2026-05-01T14:38:15Z",
+    "start_date": "2025-04-29",
+    "end_date": "2026-04-29",
+    "total_transactions": 1390,
+    "days": 362,
+    "fixed_patterns": 10
+  },
+  "daily": [
+    {
+      "date": "2026-04-04",
+      "totals": {
+        "total_income": 0.0,
+        "total_expense": 3414.33,
+        "net": -3414.33,
+        "fixed_expense": 168.96,
+        "dynamic_expense": 3245.37,
+        "fixed_income": 0.0,
+        "dynamic_income": 0.0
+      },
+      "categories": [
+        {
+          "category": "services_and_utilities",
+          "total_expense": 168.96,
+          "fixed_expense": 168.96,
+          "transaction_count": 1,
+          "merchants": [
+            {
+              "merchant": "Spotify Egypt",
+              "total_expense": 168.96,
+              "fixed_expense": 168.96,
+              "transaction_count": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+}
+```
+
+### REST API (Hugging Face Space)
+
+Baseera is also deployed as a live REST API on Hugging Face Spaces. You can send a payload containing your `starting_balance`, `horizon_days`, and your raw `transactions` to the `/analyze` endpoint to receive both the 30-day forecast and the preprocessed historical summary.
+
+#### Using `curl` & `jq` (Terminal)
+If you have a large `generated_ledger.json` file, you can use `jq` to wrap it in the required payload structure and pipe it to the API:
+
+```bash
+jq '{starting_balance: 250000, horizon_days: 30, transactions: .}' data/generated_ledger.json \
+  | curl -X POST https://mo7amed20o03-bassera-hybrid-forecasting-system.hf.space/analyze \
+  -H "Content-Type: application/json" \
+  -d @- -o outputs/live_api_response.json
+```
+
+#### Using Python
+```python
+import json
+import requests
+
+# 1. Load your raw transaction list
+with open('data/generated_ledger.json', 'r') as f:
+    ledger = json.load(f)
+
+# 2. Build the API payload
+payload = {
+    "starting_balance": 250000,
+    "horizon_days": 30,
+    "transactions": ledger
+}
+
+# 3. Send the request
+url = 'https://mo7amed20o03-bassera-hybrid-forecasting-system.hf.space/analyze'
+response = requests.post(url, json=payload)
+
+# 4. Extract the results
+if response.status_code == 200:
+    data = response.json()
+    print("Forecast summary:", data["forecast"]["summary"])
+    print("Detected fixed patterns:", data["summary"]["metadata"]["fixed_patterns"])
+else:
+    print(f"Error {response.status_code}: {response.text}")
+```
+
 ---
 
 ## 📁 Outputs & Artifacts
 
 After running an inference pipeline, check the following directories:
 
-- **Forecast Data (`outputs/forecast.csv`):** A day-by-day breakdown of projected rule-based income, rule-based expenses, GRU-predicted random expenses, and net balance.
+- **Forecast Result (`outputs/forecast_result.json`):** The structured model forecast payload containing metadata, summary, warnings, detected rules, and 30-day daily projections.
+- **Preprocessed Summary (`outputs/preprocessed_summary.json`):** A daily audit trail of the last 12 months of cleaned historical transactions, grouped by day → category → merchant, with fixed vs dynamic income/expense breakdowns. The `fixed_patterns` field indicates the number of unique (category, merchant) pairs detected as recurring obligations (salaries, subscriptions, installments).
+- **Forecast CSV (`outputs/forecast.csv`):** A day-by-day breakdown of projected rule-based income, rule-based expenses, GRU-predicted random expenses, and net balance.
 - **Visualizations (`outputs/plots/`):**
   - `balance_forecast.png`: A 30-day line chart of your projected bank balance, with scatter points indicating salary days and fixed expense days.
   - `daily_cashflow.png`: A bar chart separating deterministic expenses vs. GRU expenses.

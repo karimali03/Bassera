@@ -92,9 +92,13 @@ Total = LossExpense + 2.0 * LossIncome
 
 ---
 
-## 5. Output: Structured Forecast Payload
+## 5. Output: Structured Payloads
 
-The system produces a comprehensive JSON payload designed for direct consumption by backend services:
+The system produces two complementary JSON outputs, cleanly separating **model predictions** from **historical analysis**.
+
+### Forecast Payload (`forecast_result.json`)
+
+The forward-looking model output, designed for direct consumption by backend services:
 
 | Field | Description |
 |---|---|
@@ -104,6 +108,20 @@ The system produces a comprehensive JSON payload designed for direct consumption
 | `rules.fixed_incomes` | Detected recurring income rules (name, day, value, confidence) |
 | `rules.fixed_expenses` | Detected recurring expense rules (name, day, value, confidence) |
 | `daily_forecast` | Per-day breakdown: dynamic/fixed income & expense, net cash flow, projected balance |
+
+### Preprocessed Summary (`preprocessed_summary.json`)
+
+A backward-looking audit trail of the last 12 months of cleaned historical transactions, providing full visibility into how the model's input data was formed:
+
+| Field | Description |
+|---|---|
+| `metadata.fixed_patterns` | Count of unique (category, merchant) pairs detected as recurring (salaries, subscriptions, installments) |
+| `metadata.days` | Number of unique days in the summary window |
+| `daily[].totals` | Per-day aggregates: `total_income`, `total_expense`, `net`, `fixed_income`, `dynamic_income`, `fixed_expense`, `dynamic_expense` |
+| `daily[].categories[]` | Per-category breakdown within each day, with the same fixed/dynamic split and `transaction_count` |
+| `daily[].categories[].merchants[]` | Per-merchant breakdown within each category, with the same fixed/dynamic split and `transaction_count` |
+
+The nesting hierarchy is **day → category → merchant**. A transaction is classified as "fixed" if its (category, merchant) pair matches an active, high/medium-confidence pattern detected by the Rule Detector; otherwise it is "dynamic".
 
 ---
 
